@@ -650,7 +650,7 @@ var _ = Describe("ModelCatalog controller", func() {
 				Expect(defaultConfigMap.Data["sources.yaml"]).To(ContainSubstring("yamlCatalogPath: /shared-data/models-catalog.yaml"))
 			})
 
-			It("Should update default sources ConfigMap when changed", func() {
+			It("Should NOT update default sources ConfigMap when user modifies it", func() {
 				By("Creating initial resources")
 				_, err := catalogReconciler.ensureCatalogResources(ctx)
 				Expect(err).To(Not(HaveOccurred()))
@@ -663,8 +663,9 @@ var _ = Describe("ModelCatalog controller", func() {
 				}, defaultConfigMap)
 				Expect(err).To(Not(HaveOccurred()))
 
-				By("Modifying the ConfigMap to simulate external changes")
-				defaultConfigMap.Data["sources.yaml"] = "catalogs:\n  - name: Modified\n    id: modified"
+				By("Modifying the ConfigMap to simulate user customization")
+				customContent := "catalogs:\n  - name: My Custom Catalog\n    id: custom_user_catalog"
+				defaultConfigMap.Data["sources.yaml"] = customContent
 				err = k8sClient.Update(ctx, defaultConfigMap)
 				Expect(err).To(Not(HaveOccurred()))
 
@@ -672,7 +673,45 @@ var _ = Describe("ModelCatalog controller", func() {
 				_, err = catalogReconciler.ensureCatalogResources(ctx)
 				Expect(err).To(Not(HaveOccurred()))
 
-				By("Verifying the ConfigMap was restored to the expected state")
+				By("Verifying the user's modifications were preserved")
+				err = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "model-catalog-default-sources",
+					Namespace: namespaceName,
+				}, defaultConfigMap)
+				Expect(err).To(Not(HaveOccurred()))
+				Expect(defaultConfigMap.Data["sources.yaml"]).To(Equal(customContent))
+				Expect(defaultConfigMap.Data["sources.yaml"]).To(ContainSubstring("custom_user_catalog"))
+			})
+
+			It("Should recreate default sources ConfigMap when deleted", func() {
+				By("Creating initial resources")
+				_, err := catalogReconciler.ensureCatalogResources(ctx)
+				Expect(err).To(Not(HaveOccurred()))
+
+				By("Verifying the default sources ConfigMap exists")
+				defaultConfigMap := &corev1.ConfigMap{}
+				err = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "model-catalog-default-sources",
+					Namespace: namespaceName,
+				}, defaultConfigMap)
+				Expect(err).To(Not(HaveOccurred()))
+
+				By("Deleting the ConfigMap")
+				err = k8sClient.Delete(ctx, defaultConfigMap)
+				Expect(err).To(Not(HaveOccurred()))
+
+				By("Verifying the ConfigMap is gone")
+				err = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "model-catalog-default-sources",
+					Namespace: namespaceName,
+				}, defaultConfigMap)
+				Expect(errors.IsNotFound(err)).To(BeTrue())
+
+				By("Running reconciliation to trigger recreation")
+				_, err = catalogReconciler.ensureCatalogResources(ctx)
+				Expect(err).To(Not(HaveOccurred()))
+
+				By("Verifying the ConfigMap was recreated with defaults")
 				err = k8sClient.Get(ctx, types.NamespacedName{
 					Name:      "model-catalog-default-sources",
 					Namespace: namespaceName,

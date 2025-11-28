@@ -119,8 +119,14 @@ func (r *ModelCatalogReconciler) ensureCatalogResources(ctx context.Context) (ct
 		return ctrl.Result{}, err
 	}
 
-	// Create or update the managed default sources ConfigMap
-	result2, err := r.createOrUpdateConfigmap(ctx, catalogParams, "catalog-default-configmap.yaml.tmpl", crOwner)
+	// Create the default sources ConfigMap if it doesn't exist (user-editable)
+	var defaultSourcesCM corev1.ConfigMap
+	if err := r.Apply(catalogParams, "catalog-default-configmap.yaml.tmpl", &defaultSourcesCM); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.applyLabels(&defaultSourcesCM.ObjectMeta, catalogParams)
+	r.applyOwnerReference(&defaultSourcesCM.ObjectMeta, crOwner)
+	result2, err := r.createIfNotExists(ctx, &corev1.ConfigMap{}, &defaultSourcesCM)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
